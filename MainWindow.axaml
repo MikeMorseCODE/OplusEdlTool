@@ -350,7 +350,7 @@
                                 Margin="0,8,0,0" Classes="success"
                                 ToolTip.Tip="Auto detect device mode and start flashing all selected partitions"/>
                         
-                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" 
+                        <WrapPanel HorizontalAlignment="Center" 
                                     Margin="0,8,0,0">
                             <CheckBox x:Name="ExportXmlCheckBox" Content="Export XML" 
                                       Margin="0,0,16,0" FontSize="12"
@@ -358,9 +358,12 @@
                             <CheckBox x:Name="ProtectLun5CheckBox" Content="Protect LUN5" x:FieldModifier="public" 
                                       Margin="0,0,16,0" FontSize="12" IsChecked="True"
                                       ToolTip.Tip="Skip flashing partitions in rawprogram5.xml to protect LUN5"/>
+                            <CheckBox x:Name="SkipPatchXmlCheckBox" Content="Skip Patch XML" 
+                                      Margin="0,0,16,0" FontSize="12"
+                                      ToolTip.Tip="Skip writing all patch XML files regardless of whether the firmware contains any"/>
                             <CheckBox x:Name="AutoRebootCheckBox" Content="Auto reboot after flash" FontSize="12"
                                       ToolTip.Tip="Automatically reboot device after flashing is complete"/>
-                        </StackPanel>
+                        </WrapPanel>
                     </StackPanel>
                 </Grid>
             </Border>

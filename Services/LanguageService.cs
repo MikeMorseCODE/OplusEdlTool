@@ -159,6 +159,10 @@ namespace OplusEdlTool.Services
         public static string ExportXmlTooltip => LanguageService.IsChinese ? "备份分区时同时导出 rawprogram XML 文件" : "Export rawprogram XML when backing up partitions";
         public static string StartFlash => LanguageService.IsChinese ? "开始刷机" : "Start Flash";
         public static string ProtectLun5 => LanguageService.IsChinese ? "保护 LUN5" : "Protect LUN5";
+        public static string SkipPatchXml => LanguageService.IsChinese ? "不写 Patch XML" : "Skip Patch XML";
+        public static string SkipPatchXmlTooltip => LanguageService.IsChinese 
+            ? "跳过所有 Patch XML 的写入，无论固件中是否存在 patch 文件" 
+            : "Skip writing all patch XML files regardless of whether the firmware contains any";
         public static string Log => LanguageService.IsChinese ? "日志" : "Log";
         public static string Port9008 => LanguageService.IsChinese ? "9008 端口:" : "9008 Port:";
         public static string NotDetected => LanguageService.IsChinese ? "未检测到" : "Not detected";
@@ -182,6 +186,10 @@ namespace OplusEdlTool.Services
         public static string NoSelection => LanguageService.IsChinese ? "未选择" : "No Selection";
         public static string PleaseSelectXml => LanguageService.IsChinese ? "请至少选择一个 XML 文件来加载。" : "Please select at least one XML file to load.";
         public static string Error => LanguageService.IsChinese ? "错误" : "Error";
+        public static string BtnOk => LanguageService.IsChinese ? "确定" : "OK";
+        public static string BtnYes => LanguageService.IsChinese ? "是" : "Yes";
+        public static string BtnNo => LanguageService.IsChinese ? "否" : "No";
+        public static string BtnCancel => LanguageService.IsChinese ? "取消" : "Cancel";
         public static string LanguageSwitch => LanguageService.IsChinese ? "切换语言" : "Switch Language";
         public static string LanguageSwitchMessage => LanguageService.IsChinese 
             ? "语言将切换为英语。\n需要重启应用程序才能生效。\n\n是否立即重启？" 

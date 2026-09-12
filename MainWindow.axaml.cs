@@ -179,6 +179,8 @@ namespace OplusEdlTool
             AutoRebootCheckBox.Content = Lang.AutoReboot;
             ExportXmlCheckBox.Content = Lang.ExportXml;
             ProtectLun5CheckBox.Content = Lang.ProtectLun5;
+            SkipPatchXmlCheckBox.Content = Lang.SkipPatchXml;
+            ToolTip.SetTip(SkipPatchXmlCheckBox, Lang.SkipPatchXmlTooltip);
             LblLog.Text = Lang.Log;
             LblPort9008.Text = Lang.Port9008;
             BtnClear.Content = Lang.Clear;
@@ -1646,11 +1648,17 @@ namespace OplusEdlTool
 
                 if (rawProgramFiles != null && rawProgramFiles.Length > 0)
                 {
-                    AppendLog("Applying patch files...");
+                    AppendLog(SkipPatchXmlCheckBox.IsChecked == true 
+                        ? "[Skip Patch XML] Skipping patch XML files" 
+                        : "Applying patch files...");
                     var patchMode = await edl.TestRwModeAsync(port);
                     var patchRwMode = patchMode.rwmode;
                     var patchXmlFiles = rawProgramFiles.AsEnumerable();
-                    if (protectLun5)
+                    if (SkipPatchXmlCheckBox.IsChecked == true)
+                    {
+                        patchXmlFiles = Enumerable.Empty<string>();
+                    }
+                    else if (protectLun5)
                     {
                         patchXmlFiles = rawProgramFiles.Where(f => 
                             !Path.GetFileName(f).Equals("rawprogram5.xml", StringComparison.OrdinalIgnoreCase));
@@ -1662,6 +1670,10 @@ namespace OplusEdlTool
                     if (patchCount > 0)
                     {
                         AppendLog($"Patch files applied: {patchCount} file(s)");
+                    }
+                    else if (SkipPatchXmlCheckBox.IsChecked == true)
+                    {
+                        AppendLog("[Skip Patch XML] Skipped by user setting");
                     }
                     else
                     {
@@ -1906,13 +1918,19 @@ namespace OplusEdlTool
 
                 if (rawProgramFiles != null && rawProgramFiles.Length > 0)
                 {
-                    AppendLog("Applying patch files...");
+                    AppendLog(SkipPatchXmlCheckBox.IsChecked == true 
+                        ? "[Skip Patch XML] Skipping patch XML files" 
+                        : "Applying patch files...");
                     
                     var patchMode = await edl.TestRwModeAsync(port);
                     var patchRwMode = patchMode.rwmode;
                     
                     var patchXmlFiles = rawProgramFiles.AsEnumerable();
-                    if (protectLun5)
+                    if (SkipPatchXmlCheckBox.IsChecked == true)
+                    {
+                        patchXmlFiles = Enumerable.Empty<string>();
+                    }
+                    else if (protectLun5)
                     {
                         patchXmlFiles = rawProgramFiles.Where(f => 
                             !Path.GetFileName(f).Equals("rawprogram5.xml", StringComparison.OrdinalIgnoreCase));
@@ -1924,6 +1942,10 @@ namespace OplusEdlTool
                     if (patchCount > 0)
                     {
                         AppendLog($"Patch files applied: {patchCount} file(s)");
+                    }
+                    else if (SkipPatchXmlCheckBox.IsChecked == true)
+                    {
+                        AppendLog("[Skip Patch XML] Skipped by user setting");
                     }
                     else
                     {
@@ -2068,6 +2090,7 @@ namespace OplusEdlTool
             var dialog = new Window
             {
                 Title = title,
+                Icon = this.Icon,
                 MinWidth = 300,
                 MaxWidth = 600,
                 MinHeight = 150,
@@ -2101,26 +2124,26 @@ namespace OplusEdlTool
 
             if (buttons == MessageBoxButtons.OK)
             {
-                var okBtn = new Button { Content = "OK", Width = 80, Margin = new Thickness(5), HorizontalContentAlignment = Avalonia.Layout.HorizontalAlignment.Center };
+                var okBtn = new Button { Content = Lang.BtnOk, Width = 80, Margin = new Thickness(5), HorizontalContentAlignment = Avalonia.Layout.HorizontalAlignment.Center };
                 okBtn.Click += (s, e) => { result = MessageBoxResult.OK; dialog.Close(); };
                 buttonPanel.Children.Add(okBtn);
             }
             else if (buttons == MessageBoxButtons.YesNo)
             {
-                var yesBtn = new Button { Content = "Yes", Width = 80, Margin = new Thickness(5), HorizontalContentAlignment = Avalonia.Layout.HorizontalAlignment.Center };
+                var yesBtn = new Button { Content = Lang.BtnYes, Width = 80, Margin = new Thickness(5), HorizontalContentAlignment = Avalonia.Layout.HorizontalAlignment.Center };
                 yesBtn.Click += (s, e) => { result = MessageBoxResult.Yes; dialog.Close(); };
-                var noBtn = new Button { Content = "No", Width = 80, Margin = new Thickness(5), HorizontalContentAlignment = Avalonia.Layout.HorizontalAlignment.Center };
+                var noBtn = new Button { Content = Lang.BtnNo, Width = 80, Margin = new Thickness(5), HorizontalContentAlignment = Avalonia.Layout.HorizontalAlignment.Center };
                 noBtn.Click += (s, e) => { result = MessageBoxResult.No; dialog.Close(); };
                 buttonPanel.Children.Add(yesBtn);
                 buttonPanel.Children.Add(noBtn);
             }
             else if (buttons == MessageBoxButtons.YesNoCancel)
             {
-                var yesBtn = new Button { Content = "Yes", Width = 80, Margin = new Thickness(5), HorizontalContentAlignment = Avalonia.Layout.HorizontalAlignment.Center };
+                var yesBtn = new Button { Content = Lang.BtnYes, Width = 80, Margin = new Thickness(5), HorizontalContentAlignment = Avalonia.Layout.HorizontalAlignment.Center };
                 yesBtn.Click += (s, e) => { result = MessageBoxResult.Yes; dialog.Close(); };
-                var noBtn = new Button { Content = "No", Width = 80, Margin = new Thickness(5), HorizontalContentAlignment = Avalonia.Layout.HorizontalAlignment.Center };
+                var noBtn = new Button { Content = Lang.BtnNo, Width = 80, Margin = new Thickness(5), HorizontalContentAlignment = Avalonia.Layout.HorizontalAlignment.Center };
                 noBtn.Click += (s, e) => { result = MessageBoxResult.No; dialog.Close(); };
-                var cancelBtn = new Button { Content = "Cancel", Width = 80, Margin = new Thickness(5), HorizontalContentAlignment = Avalonia.Layout.HorizontalAlignment.Center };
+                var cancelBtn = new Button { Content = Lang.BtnCancel, Width = 80, Margin = new Thickness(5), HorizontalContentAlignment = Avalonia.Layout.HorizontalAlignment.Center };
                 cancelBtn.Click += (s, e) => { result = MessageBoxResult.Cancel; dialog.Close(); };
                 buttonPanel.Children.Add(yesBtn);
                 buttonPanel.Children.Add(noBtn);
