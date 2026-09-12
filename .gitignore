@@ -1,0 +1,8 @@
+# IDE / Visual Studio
+.vs/
+
+# Build output
+bin/
+obj/
+
+OplusEdlTool.slnx

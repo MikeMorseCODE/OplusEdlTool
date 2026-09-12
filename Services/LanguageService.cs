@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.IO;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -25,21 +26,59 @@ namespace OplusEdlTool.Services
                     var settings = JsonSerializer.Deserialize(json, LanguageJsonContext.Default.LanguageSettings);
                     if (settings != null && !string.IsNullOrEmpty(settings.Language))
                     {
-                        _currentLanguage = settings.Language;
+                        _currentLanguage = NormalizeLanguage(settings.Language);
                         System.Diagnostics.Debug.WriteLine($"Language loaded: {_currentLanguage}");
+                        return;
                     }
                 }
-                else
-                {
-                    System.Diagnostics.Debug.WriteLine("Language settings file not found");
-                }
+
+                System.Diagnostics.Debug.WriteLine("Language settings not found or invalid, detecting from system language");
+                _currentLanguage = DetectSystemLanguage();
             }
             catch (Exception ex)
             {
                 System.Diagnostics.Debug.WriteLine($"Failed to load language settings: {ex.Message}");
-                _currentLanguage = "en";
+                _currentLanguage = DetectSystemLanguage();
             }
         }
+
+        private static string DetectSystemLanguage()
+        {
+            try
+            {
+                var name = CultureInfo.CurrentUICulture.Name;
+                if (string.IsNullOrEmpty(name) || name == "iv")
+                {
+                    name = CultureInfo.InstalledUICulture.Name;
+                }
+
+                var detected = IsChineseCulture(name) ? "zh" : "en";
+                System.Diagnostics.Debug.WriteLine($"Detected system language: {name} -> {detected}");
+                return detected;
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Failed to detect system language: {ex.Message}");
+                return "en";
+            }
+        }
+
+        private static bool IsChineseCulture(string? cultureName)
+        {
+            if (string.IsNullOrEmpty(cultureName) || cultureName == "iv")
+            {
+                return false;
+            }
+
+            return cultureName.Equals("zh", StringComparison.OrdinalIgnoreCase)
+                || cultureName.StartsWith("zh-", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static string NormalizeLanguage(string language)
+        {
+            return language.StartsWith("zh", StringComparison.OrdinalIgnoreCase) ? "zh" : "en";
+        }
+
         public static bool SaveLanguage(string language)
         {
             try
