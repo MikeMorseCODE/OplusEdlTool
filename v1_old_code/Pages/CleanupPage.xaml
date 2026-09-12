@@ -1,8 +1,0 @@
-<UserControl x:Class="OplusEdlTool.Pages.CleanupPage"
-             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             MinWidth="400" MinHeight="300">
-    <StackPanel Margin="12">
-        <Button Content="Cleanup" Width="140" HorizontalAlignment="Left" Click="Run_Click"/>
-    </StackPanel>
-</UserControl>
