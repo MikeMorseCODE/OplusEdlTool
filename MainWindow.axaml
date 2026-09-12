@@ -356,7 +356,7 @@
                                       Margin="0,0,16,0" FontSize="12"
                                       ToolTip.Tip="Export selected partitions to rawprogram XML when backing up"/>
                             <CheckBox x:Name="ProtectLun5CheckBox" Content="Protect LUN5" x:FieldModifier="public" 
-                                      Margin="0,0,16,0" FontSize="12" IsChecked="True"
+                                      Margin="0,0,16,0" FontSize="12"
                                       ToolTip.Tip="Skip flashing partitions in rawprogram5.xml to protect LUN5"/>
                             <CheckBox x:Name="SkipPatchXmlCheckBox" Content="Skip Patch XML" 
                                       Margin="0,0,16,0" FontSize="12"
