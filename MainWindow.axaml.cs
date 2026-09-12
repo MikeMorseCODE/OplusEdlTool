@@ -585,9 +585,6 @@ namespace OplusEdlTool
             }
 
             AppendLog($"Extraction completed: {extractPath}");
-            _romPackage = ext == ".ofp"
-                ? FirmwarePackageClassifier.ClassifyOfp(extractPath)
-                : RomPackageInfo.Unknown;
             await MergeSuperImages(extractPath);
             var imagesPath = FindImagesFolder(extractPath) ?? extractPath;
             if (!await ValidateAndLoadRawProgram(imagesPath, extractPath))
@@ -2115,7 +2112,6 @@ namespace OplusEdlTool
 
         private static string GetRomPackageKindName(RomPackageKind kind) => kind switch
         {
-            RomPackageKind.OfficialOfp => Lang.PackageKindOfficialOfp,
             RomPackageKind.OfficialSfp => Lang.PackageKindOfficialSfp,
             RomPackageKind.ThirdParty => Lang.PackageKindThirdParty,
             _ => Lang.PackageKindUnknown

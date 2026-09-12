@@ -166,7 +166,6 @@ namespace OplusEdlTool.Services
         public static string RomPackageDetected => LanguageService.IsChinese 
             ? "固件包类型: {0}（{1}）" 
             : "Firmware package type: {0} ({1})";
-        public static string PackageKindOfficialOfp => LanguageService.IsChinese ? "官方包 (OFP)" : "Official (OFP)";
         public static string PackageKindOfficialSfp => LanguageService.IsChinese ? "官方包 (SFP)" : "Official (SFP)";
         public static string PackageKindThirdParty => LanguageService.IsChinese ? "第三方/自定义包" : "Third-party/custom";
         public static string PackageKindUnknown => LanguageService.IsChinese ? "未判定" : "Not classified";

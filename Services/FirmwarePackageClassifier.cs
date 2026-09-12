@@ -11,7 +11,6 @@ namespace OplusEdlTool.Services
     public enum RomPackageKind
     {
         Unknown,
-        OfficialOfp,
         OfficialSfp,
         ThirdParty
     }
@@ -28,47 +27,9 @@ namespace OplusEdlTool.Services
         private const string VersionInfoName = "version_info.txt";
         private const string ChecksumManifestName = "all_files_checksum.txt";
         private const string ProjectConfigName = "Projectconfig.xml";
-        private const string OfpProfileName = "ProFile.xml";
         private const string ImagesFolderName = "IMAGES";
         private const long MaximumTextFileBytes = 16L * 1024 * 1024;
         private const int MaximumXmlCharacters = 32 * 1024 * 1024;
-
-        public static RomPackageInfo ClassifyOfp(string extractPath)
-        {
-            if (string.IsNullOrWhiteSpace(extractPath))
-            {
-                return new RomPackageInfo(RomPackageKind.ThirdParty, "解包路径为空");
-            }
-
-            string profilePath = Path.Combine(extractPath, OfpProfileName);
-            if (!File.Exists(profilePath))
-            {
-                return new RomPackageInfo(RomPackageKind.ThirdParty, $"未找到 {OfpProfileName}（缺少官方包元数据）");
-            }
-
-            XDocument? document = TryLoadXml(profilePath);
-            if (document == null)
-            {
-                return new RomPackageInfo(RomPackageKind.ThirdParty, $"{OfpProfileName} 解析失败");
-            }
-
-            XElement? projectConfig = document.Descendants()
-                .FirstOrDefault(element => NameEquals(element, "ProjectConfig"));
-            if (projectConfig == null)
-            {
-                return new RomPackageInfo(RomPackageKind.ThirdParty, $"{OfpProfileName} 缺少 ProjectConfig");
-            }
-
-            string[] projectIds = ExtractProjectIds(document);
-            if (projectIds.Length == 0)
-            {
-                return new RomPackageInfo(RomPackageKind.ThirdParty, "ProjectConfig 未定义有效项目号");
-            }
-
-            return new RomPackageInfo(
-                RomPackageKind.OfficialOfp,
-                $"ProjectConfig 项目号: {string.Join(", ", projectIds)}");
-        }
 
         public static RomPackageInfo ClassifyRomFolder(string romRootPath)
         {
