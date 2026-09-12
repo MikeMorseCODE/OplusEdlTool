@@ -128,6 +128,7 @@ namespace OplusEdlTool
         private string? currentRwMode;
         private string? romImagesPath;
         private string[]? rawProgramFiles;
+        private RomPackageInfo _romPackage = RomPackageInfo.Unknown;
 
         public MainWindow()
         {
@@ -513,6 +514,7 @@ namespace OplusEdlTool
             
             if (folders.Count == 0) return;
 
+            _romPackage = RomPackageInfo.Unknown;
             var selectedPath = folders[0].Path.LocalPath;
             var imagesPath = FindImagesFolder(selectedPath);
             
@@ -524,6 +526,9 @@ namespace OplusEdlTool
             }
 
             if (!await ValidateAndLoadRawProgram(imagesPath, selectedPath)) return;
+
+            _romPackage = FirmwarePackageClassifier.ClassifyRomFolder(selectedPath);
+            LogRomPackage();
         }
 
         private async Task SelectOfpOpsFile()
@@ -541,6 +546,7 @@ namespace OplusEdlTool
             
             if (files.Count == 0) return;
 
+            _romPackage = RomPackageInfo.Unknown;
             var filePath = files[0].Path.LocalPath;
             var ext = Path.GetExtension(filePath).ToLower();
 
@@ -579,9 +585,18 @@ namespace OplusEdlTool
             }
 
             AppendLog($"Extraction completed: {extractPath}");
+            _romPackage = ext == ".ofp"
+                ? FirmwarePackageClassifier.ClassifyOfp(extractPath)
+                : RomPackageInfo.Unknown;
             await MergeSuperImages(extractPath);
             var imagesPath = FindImagesFolder(extractPath) ?? extractPath;
-            if (!await ValidateAndLoadRawProgram(imagesPath, extractPath)) return;
+            if (!await ValidateAndLoadRawProgram(imagesPath, extractPath))
+            {
+                _romPackage = RomPackageInfo.Unknown;
+                return;
+            }
+
+            LogRomPackage();
         }
 
         private async Task MergeSuperImages(string extractPath)
@@ -934,7 +949,7 @@ namespace OplusEdlTool
                 Grid.ItemsSource = rows.ToList();
                 
                 var existingFiles = rows.Count(r => !r.FilePath.StartsWith("[NOT FOUND]"));
-                RomInfo.Text = $"Found {totalPartitions} partitions, {existingFiles} files available";
+                RomInfo.Text = $"Found {totalPartitions} partitions, {existingFiles} files available | {GetRomPackageKindName(_romPackage.Kind)}";
             });
             
             AppendLog($"Loaded {totalPartitions} partitions from {rawProgramFiles.Length} XML files");
@@ -1680,7 +1695,14 @@ namespace OplusEdlTool
                         AppendLog("No patch files were applied (files may not exist)");
                     }
                     
-                    await edl.SendSetBootableStorageDriveAsync(port);
+                    if (_romPackage.IsThirdParty)
+                    {
+                        AppendLog(Lang.BootPartitionSkippedNonOfficial);
+                    }
+                    else
+                    {
+                        await edl.SendSetBootableStorageDriveAsync(port);
+                    }
                 }
 
                 if (AutoRebootCheckBox.IsChecked == true)
@@ -1952,7 +1974,14 @@ namespace OplusEdlTool
                         AppendLog("No patch files were applied (files may not exist)");
                     }
                     
-                    await edl.SendSetBootableStorageDriveAsync(port);
+                    if (_romPackage.IsThirdParty)
+                    {
+                        AppendLog(Lang.BootPartitionSkippedNonOfficial);
+                    }
+                    else
+                    {
+                        await edl.SendSetBootableStorageDriveAsync(port);
+                    }
                 }
 
                 if (AutoRebootCheckBox.IsChecked == true)
@@ -2083,6 +2112,20 @@ namespace OplusEdlTool
         #region Helper Methods
         private enum MessageBoxButtons { OK, YesNo, YesNoCancel }
         private enum MessageBoxResult { OK, Yes, No, Cancel }
+
+        private static string GetRomPackageKindName(RomPackageKind kind) => kind switch
+        {
+            RomPackageKind.OfficialOfp => Lang.PackageKindOfficialOfp,
+            RomPackageKind.OfficialSfp => Lang.PackageKindOfficialSfp,
+            RomPackageKind.OfficialScatter => Lang.PackageKindOfficialScatter,
+            RomPackageKind.ThirdParty => Lang.PackageKindThirdParty,
+            _ => Lang.PackageKindUnknown
+        };
+
+        private void LogRomPackage()
+        {
+            AppendLog(string.Format(Lang.RomPackageDetected, GetRomPackageKindName(_romPackage.Kind), _romPackage.Reason));
+        }
 
         private async System.Threading.Tasks.Task<MessageBoxResult> ShowMessageBox(
             string message, string title, MessageBoxButtons buttons)

@@ -163,6 +163,17 @@ namespace OplusEdlTool.Services
         public static string SkipPatchXmlTooltip => LanguageService.IsChinese 
             ? "跳过所有 Patch XML 的写入，无论固件中是否存在 patch 文件" 
             : "Skip writing all patch XML files regardless of whether the firmware contains any";
+        public static string RomPackageDetected => LanguageService.IsChinese 
+            ? "固件包类型: {0}（{1}）" 
+            : "Firmware package type: {0} ({1})";
+        public static string PackageKindOfficialOfp => LanguageService.IsChinese ? "官方包 (OFP)" : "Official (OFP)";
+        public static string PackageKindOfficialSfp => LanguageService.IsChinese ? "官方包 (SFP)" : "Official (SFP)";
+        public static string PackageKindOfficialScatter => LanguageService.IsChinese ? "官方包 (散包)" : "Official (scatter)";
+        public static string PackageKindThirdParty => LanguageService.IsChinese ? "第三方/自定义包" : "Third-party/custom";
+        public static string PackageKindUnknown => LanguageService.IsChinese ? "未判定" : "Not classified";
+        public static string BootPartitionSkippedNonOfficial => LanguageService.IsChinese 
+            ? "[启动分区] 当前为第三方/自定义包，跳过设置启动分区" 
+            : "[Boot] Third-party/custom package, skipping setbootablestoragedrive";
         public static string Log => LanguageService.IsChinese ? "日志" : "Log";
         public static string Port9008 => LanguageService.IsChinese ? "9008 端口:" : "9008 Port:";
         public static string NotDetected => LanguageService.IsChinese ? "未检测到" : "Not detected";
