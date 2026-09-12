@@ -13,7 +13,6 @@ namespace OplusEdlTool.Services
         Unknown,
         OfficialOfp,
         OfficialSfp,
-        OfficialScatter,
         ThirdParty
     }
 
@@ -102,23 +101,11 @@ namespace OplusEdlTool.Services
             bool manifestHasProjectConfig = hasChecksumManifest &&
                 ManifestContainsProjectConfig(Path.Combine(root, ChecksumManifestName));
 
-            string? projectConfigPath = FindProjectConfigFile(root, out string projectConfigRelativeName);
-            string[] projectIds = projectConfigPath == null
-                ? Array.Empty<string>()
-                : ReadProjectIds(projectConfigPath);
-
             if (hasVersionInfo && hasChecksumManifest && manifestHasProjectConfig)
             {
                 return new RomPackageInfo(
                     RomPackageKind.OfficialSfp,
-                    $"{VersionInfoName} + {ChecksumManifestName} 校验通过, {ProjectConfigName}{DescribeProjectIds(projectIds)}");
-            }
-
-            if (projectConfigPath != null)
-            {
-                return new RomPackageInfo(
-                    RomPackageKind.OfficialScatter,
-                    $"{projectConfigRelativeName}{DescribeProjectIds(projectIds)}");
+                    $"{VersionInfoName} + {ChecksumManifestName} 校验通过, {ProjectConfigName}{DescribeProjectIds(ReadPackageProjectIds(root))}");
             }
 
             if (hasVersionInfo || hasChecksumManifest)
@@ -130,30 +117,22 @@ namespace OplusEdlTool.Services
 
             return new RomPackageInfo(
                 RomPackageKind.ThirdParty,
-                $"未找到 {VersionInfoName} / {ChecksumManifestName} / {ProjectConfigName}");
+                $"未找到 {VersionInfoName} / {ChecksumManifestName}");
         }
 
         private static string DescribeProjectIds(string[] projectIds) =>
             projectIds.Length == 0 ? string.Empty : $", 项目号: {string.Join(", ", projectIds)}";
 
-        private static string? FindProjectConfigFile(string root, out string relativeName)
+        private static string[] ReadPackageProjectIds(string root)
         {
             string direct = Path.Combine(root, ProjectConfigName);
             if (File.Exists(direct))
             {
-                relativeName = ProjectConfigName;
-                return direct;
+                return ReadProjectIds(direct);
             }
 
             string inImages = Path.Combine(root, ImagesFolderName, ProjectConfigName);
-            if (File.Exists(inImages))
-            {
-                relativeName = $"{ImagesFolderName}/{ProjectConfigName}";
-                return inImages;
-            }
-
-            relativeName = string.Empty;
-            return null;
+            return File.Exists(inImages) ? ReadProjectIds(inImages) : Array.Empty<string>();
         }
 
         private static string[] ReadProjectIds(string projectConfigPath)

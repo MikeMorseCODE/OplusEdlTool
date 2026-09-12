@@ -5,4 +5,8 @@
 bin/
 obj/
 
+# User-specific IDE / publish settings
+*.csproj.user
+Properties/PublishProfiles/*.pubxml.user
+
 OplusEdlTool.slnx

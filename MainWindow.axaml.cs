@@ -2117,7 +2117,6 @@ namespace OplusEdlTool
         {
             RomPackageKind.OfficialOfp => Lang.PackageKindOfficialOfp,
             RomPackageKind.OfficialSfp => Lang.PackageKindOfficialSfp,
-            RomPackageKind.OfficialScatter => Lang.PackageKindOfficialScatter,
             RomPackageKind.ThirdParty => Lang.PackageKindThirdParty,
             _ => Lang.PackageKindUnknown
         };
