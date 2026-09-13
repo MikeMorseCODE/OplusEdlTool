@@ -2,7 +2,7 @@
 
 🌐 **Language:** [English](README.md) | [中文](README.zh.md)
 
-> **⚠️ Version Notice:** This is **v2**, a major rewrite of the original tool. The legacy v1 codebase (WPF-based) is archived in the [`v1_old_code/`](v1_old_code/) directory for reference.
+> **⚠️ Version Notice:** This is **v2** of the tool.
 >
 > 🚀 **Latest Version:** The newer **v3** (closed-source) is available [here](https://static-tcdn.anteasy.com/xasdun/upload-log/oet-upload.html)
 

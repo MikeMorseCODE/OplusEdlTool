@@ -2,7 +2,7 @@
 
 🌐 **语言:** [English](README.md) | [中文](README.zh.md)
 
-> **⚠️ 版本说明：** 这是 **v2** 版本，是原工具的重大重写版本。旧版 v1（基于 WPF）的代码已归档在 [`v1_old_code/`](v1_old_code/) 目录中供参考。
+> **⚠️ 版本说明：** 这是 **v2** 版本。
 >
 > 🚀 **最新版本：** 新版 **v3**（闭源）可[在此下载](https://static-tcdn.anteasy.com/xasdun/upload-log/oet-upload.html)
 
