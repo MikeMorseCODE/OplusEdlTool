@@ -118,6 +118,22 @@ namespace OplusEdlTool.Services
                 $"({programmer.Length:N0} bytes)"
             );
 
+            Log("[Linux/Sahara/Auth] Inspecting signed ELF/MBNv7 stages...");
+            var authStageCount = 0;
+            foreach (var description in SaharaProgrammerInspector.Describe(programmer))
+            {
+                authStageCount++;
+                Log("[Linux/Sahara/Auth] " + description);
+            }
+
+            if (authStageCount == 0)
+            {
+                Log(
+                    "[Linux/Sahara/Auth] No Qualcomm MBNv7 hash segments " +
+                    "were recognized in this programmer."
+                );
+            }
+
             using var context = new UsbContext();
             using var devices = context.List();
 
@@ -338,6 +354,26 @@ namespace OplusEdlTool.Services
                                     $"({statusName})"
                                 );
 
+                                if (status == 0x21)
+                                {
+                                    Log(
+                                        "[Linux/Sahara/Auth] HASH_TABLE_AUTH_FAILURE " +
+                                        "was returned after the target consumed the " +
+                                        "signed hash/authentication segment."
+                                    );
+                                    Log(
+                                        "[Linux/Sahara/Auth] This is a pre-execution " +
+                                        "authentication failure: programmer runtime " +
+                                        "initialization (DT/DDR/UFS/Firehose) has not " +
+                                        "started yet."
+                                    );
+                                    Log(
+                                        "[Linux/Sahara/Auth] Review the reported " +
+                                        "SW_ID/ARB/MRC/SoC/OEM policy for the rejected " +
+                                        "DEVICE-PROGRAMMER stage."
+                                    );
+                                }
+
                                 return false;
                             }
 
@@ -452,16 +488,21 @@ namespace OplusEdlTool.Services
             );
 
             //
-            // Match Qualcomm qdl behavior:
-            // host version 2, compatible 1, success 0,
-            // waiting-for-image mode.
+            // Qualcomm QSaharaServer v3 behavior:
+            //   version=3, version_supported=3, status=0, mode=image TX,
+            //   reserved words=1,2,3,4,5,6.
+            //
+            // Keep a legacy fallback for older targets rather than forcing v3
+            // onto a device that advertises an older protocol.
             //
             var response = new byte[48];
+            var hostVersion = version >= 3 ? 3u : 2u;
+            var hostCompatible = version >= 3 ? 3u : 1u;
 
             WriteU32(response, 0, SaharaHelloResponse);
             WriteU32(response, 4, 48);
-            WriteU32(response, 8, 2);
-            WriteU32(response, 12, 1);
+            WriteU32(response, 8, hostVersion);
+            WriteU32(response, 12, hostCompatible);
             WriteU32(response, 16, 0);
             WriteU32(
                 response,
@@ -469,9 +510,19 @@ namespace OplusEdlTool.Services
                 SaharaModeWaitingForImage
             );
 
+            if (version >= 3)
+            {
+                WriteU32(response, 24, 1);
+                WriteU32(response, 28, 2);
+                WriteU32(response, 32, 3);
+                WriteU32(response, 36, 4);
+                WriteU32(response, 40, 5);
+                WriteU32(response, 44, 6);
+            }
+
             Log(
-                "[Linux/Sahara] TX HELLO_RESP " +
-                "(WaitingForImage)"
+                $"[Linux/Sahara] TX HELLO_RESP version={hostVersion} " +
+                $"compatible={hostCompatible} mode=WaitingForImage"
             );
 
             WriteExact(writer, response);
