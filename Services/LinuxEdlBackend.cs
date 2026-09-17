@@ -119,14 +119,12 @@ namespace OplusEdlTool.Services
             );
 
             Log("[Linux/Sahara/Auth] Inspecting signed ELF/MBNv7 stages...");
-            var authStageCount = 0;
-            foreach (var description in SaharaProgrammerInspector.Describe(programmer))
-            {
-                authStageCount++;
-                Log("[Linux/Sahara/Auth] " + description);
-            }
+            var authStages = SaharaProgrammerInspector.Inspect(programmer);
 
-            if (authStageCount == 0)
+            foreach (var stage in authStages)
+                Log("[Linux/Sahara/Auth] " + stage);
+
+            if (authStages.Count == 0)
             {
                 Log(
                     "[Linux/Sahara/Auth] No Qualcomm MBNv7 hash segments " +
@@ -227,6 +225,8 @@ namespace OplusEdlTool.Services
 
                 onPercent?.Invoke(0);
 
+                SaharaAuthStage? lastAuthStageRequested = null;
+
                 while (true)
                 {
                     var packet = ReadPacket(reader);
@@ -272,6 +272,22 @@ namespace OplusEdlTool.Services
                                 $"length=0x{length:x}"
                             );
 
+                            var authStage = FindAuthStage(
+                                authStages,
+                                offset,
+                                length
+                            );
+
+                            if (authStage.HasValue)
+                            {
+                                lastAuthStageRequested = authStage;
+                                Log(
+                                    "[Linux/Sahara/Auth] Target requested " +
+                                    "signed auth stage: " +
+                                    authStage.Value
+                                );
+                            }
+
                             SendProgrammerRange(
                                 writer,
                                 programmer,
@@ -304,6 +320,22 @@ namespace OplusEdlTool.Services
                                 $"offset=0x{offset:x} " +
                                 $"length=0x{length:x}"
                             );
+
+                            var authStage = FindAuthStage(
+                                authStages,
+                                offset,
+                                length
+                            );
+
+                            if (authStage.HasValue)
+                            {
+                                lastAuthStageRequested = authStage;
+                                Log(
+                                    "[Linux/Sahara/Auth] Target requested " +
+                                    "signed auth stage: " +
+                                    authStage.Value
+                                );
+                            }
 
                             SendProgrammerRange(
                                 writer,
@@ -367,11 +399,33 @@ namespace OplusEdlTool.Services
                                         "initialization (DT/DDR/UFS/Firehose) has not " +
                                         "started yet."
                                     );
-                                    Log(
-                                        "[Linux/Sahara/Auth] Review the reported " +
-                                        "SW_ID/ARB/MRC/SoC/OEM policy for the rejected " +
-                                        "DEVICE-PROGRAMMER stage."
-                                    );
+                                    if (lastAuthStageRequested.HasValue)
+                                    {
+                                        var rejected =
+                                            lastAuthStageRequested.Value;
+
+                                        Log(
+                                            "[Linux/Sahara/Auth] Rejected stage: " +
+                                            rejected
+                                        );
+
+                                        if (rejected.SoftwareId == 0x03)
+                                        {
+                                            Log(
+                                                "[Linux/Sahara/Auth] Correlated failure: " +
+                                                "SW_ID 0x03 DEVICE-PROGRAMMER " +
+                                                "authentication policy."
+                                            );
+                                        }
+                                    }
+                                    else
+                                    {
+                                        Log(
+                                            "[Linux/Sahara/Auth] No exact MBNv7 auth " +
+                                            "range correlation was available for the " +
+                                            "last target request."
+                                        );
+                                    }
                                 }
 
                                 return false;
@@ -526,6 +580,20 @@ namespace OplusEdlTool.Services
             );
 
             WriteExact(writer, response);
+        }
+
+        private static SaharaAuthStage? FindAuthStage(
+            System.Collections.Generic.IReadOnlyList<SaharaAuthStage> stages,
+            ulong offset,
+            ulong length)
+        {
+            foreach (var stage in stages)
+            {
+                if (stage.MatchesRange(offset, length))
+                    return stage;
+            }
+
+            return null;
         }
 
         private void SendProgrammerRange(
