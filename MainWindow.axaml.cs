@@ -1756,7 +1756,24 @@ namespace OplusEdlTool
                         AppendLog("[Protect LUN5] Skipping patch5.xml");
                     }
                     
-                    var patchCount = await edl.WritePatchXmlsAsync(port, patchXmlFiles, romImagesPath, patchRwMode);
+                    var patchCount = 0;
+
+                    if (string.IsNullOrWhiteSpace(romImagesPath))
+                    {
+                        AppendLog(
+                            "[Patch XML] ROM images path is unavailable; " +
+                            "skipping patch XML processing."
+                        );
+                    }
+                    else
+                    {
+                        patchCount = await edl.WritePatchXmlsAsync(
+                            port,
+                            patchXmlFiles,
+                            romImagesPath,
+                            patchRwMode
+                        );
+                    }
                     
                     if (patchCount > 0)
                     {
@@ -1766,7 +1783,7 @@ namespace OplusEdlTool
                     {
                         AppendLog("[Skip Patch XML] Skipped by user setting");
                     }
-                    else
+                    else if (!string.IsNullOrWhiteSpace(romImagesPath))
                     {
                         AppendLog("No patch files were applied (files may not exist)");
                     }
