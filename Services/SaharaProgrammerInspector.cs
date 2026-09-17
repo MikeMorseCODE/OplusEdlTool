@@ -5,22 +5,60 @@ using System.Security.Cryptography;
 
 namespace OplusEdlTool.Services
 {
+    internal readonly record struct SaharaAuthStage(
+        int ElfIndex,
+        int ProgramHeaderIndex,
+        uint SoftwareId,
+        string SoftwareIdName,
+        uint AntiRollbackVersion,
+        uint MrcIndex,
+        uint[] SocHwVersions,
+        uint OemId,
+        uint OemProductId,
+        uint Flags,
+        uint HashAlgorithm,
+        ulong SegmentStart,
+        ulong SegmentLength,
+        string Sha384)
+    {
+        public bool MatchesRange(ulong offset, ulong length) =>
+            SegmentStart == offset && SegmentLength == length;
+
+        public override string ToString()
+        {
+            var soc = SocHwVersions.Length == 0
+                ? "none"
+                : string.Join(",", Array.ConvertAll(
+                    SocHwVersions,
+                    value => $"0x{value:x}"
+                ));
+
+            return
+                $"ELF{ElfIndex}/PH{ProgramHeaderIndex} " +
+                $"SW_ID=0x{SoftwareId:x} ({SoftwareIdName}) " +
+                $"ARB={AntiRollbackVersion} MRC={MrcIndex} " +
+                $"SoC={soc} OEM=0x{OemId:x} PID=0x{OemProductId:x} " +
+                $"flags=0x{Flags:x8} hash_alg={HashAlgorithm} " +
+                $"auth=0x{SegmentStart:x}+0x{SegmentLength:x} " +
+                $"SHA384={Sha384}";
+        }
+    }
+
     /// <summary>
     /// Read-only inspection of Qualcomm ELF/MBNv7 authentication metadata.
-    ///
-    /// This does not modify, resign, or transform the programmer. It exists so
-    /// the Linux Sahara path can report which signed image class/policy block
-    /// the target is authenticating when a Sahara error occurs.
+    /// This code never modifies, transforms, or resigns the programmer.
     /// </summary>
     internal static class SaharaProgrammerInspector
     {
         private const uint QualcommHashSegmentFlag = 0x02000000;
         private const uint QualcommSegmentTypeMask = 0x0F000000;
 
-        public static IEnumerable<string> Describe(byte[] image)
+        public static IReadOnlyList<SaharaAuthStage> Inspect(byte[] image)
         {
+            var stages = new List<SaharaAuthStage>();
+
             if (image == null || image.Length < 4)
-                yield break;
+                return stages;
 
             var elfIndex = 0;
 
@@ -35,9 +73,10 @@ namespace OplusEdlTool.Services
                 }
 
                 if (baseOffset + 6 > image.Length || image[baseOffset + 5] != 1)
-                    continue; // Little-endian ELF only.
+                    continue;
 
                 var elfClass = image[baseOffset + 4];
+
                 if (!TryGetProgramHeaderLayout(
                         image,
                         baseOffset,
@@ -51,7 +90,15 @@ namespace OplusEdlTool.Services
 
                 for (var phIndex = 0; phIndex < phnum; phIndex++)
                 {
-                    var ph = checked(baseOffset + (int)phoff + phIndex * phentsize);
+                    var ph64 =
+                        (ulong)baseOffset +
+                        phoff +
+                        (ulong)phIndex * (ulong)phentsize;
+
+                    if (ph64 > int.MaxValue)
+                        continue;
+
+                    var ph = (int)ph64;
 
                     if (!TryReadProgramHeader(
                             image,
@@ -98,19 +145,36 @@ namespace OplusEdlTool.Services
                         image.AsSpan(segmentStart, segmentLength)
                     );
 
-                    yield return
-                        $"ELF{elfIndex}/PH{phIndex} " +
-                        $"SW_ID=0x{info.SoftwareId:x} ({GetSoftwareIdName(info.SoftwareId)}) " +
-                        $"ARB={info.AntiRollbackVersion} MRC={info.MrcIndex} " +
-                        $"SoC={FormatSocVersions(info.SocHwVersions)} " +
-                        $"OEM=0x{info.OemId:x} PID=0x{info.OemProductId:x} " +
-                        $"flags=0x{info.Flags:x8} hash_alg={info.HashAlgorithm} " +
-                        $"auth=0x{segmentStart:x}+0x{segmentLength:x} " +
-                        $"SHA384={Convert.ToHexString(digest).ToLowerInvariant()}";
+                    stages.Add(
+                        new SaharaAuthStage(
+                            elfIndex,
+                            phIndex,
+                            info.SoftwareId,
+                            GetSoftwareIdName(info.SoftwareId),
+                            info.AntiRollbackVersion,
+                            info.MrcIndex,
+                            info.SocHwVersions,
+                            info.OemId,
+                            info.OemProductId,
+                            info.Flags,
+                            info.HashAlgorithm,
+                            (ulong)segmentStart,
+                            (ulong)segmentLength,
+                            Convert.ToHexString(digest).ToLowerInvariant()
+                        )
+                    );
                 }
 
                 elfIndex++;
             }
+
+            return stages;
+        }
+
+        public static IEnumerable<string> Describe(byte[] image)
+        {
+            foreach (var stage in Inspect(image))
+                yield return stage.ToString();
         }
 
         private static bool TryGetProgramHeaderLayout(
@@ -153,7 +217,11 @@ namespace OplusEdlTool.Services
                 if (phentsize <= 0 || phnum <= 0)
                     return false;
 
-                var end = (ulong)baseOffset + phoff + (ulong)phentsize * (ulong)phnum;
+                var end =
+                    (ulong)baseOffset +
+                    phoff +
+                    (ulong)phentsize * (ulong)phnum;
+
                 return end <= (ulong)image.LongLength;
             }
             catch
@@ -222,8 +290,7 @@ namespace OplusEdlTool.Services
                 if (segmentLength < 40)
                     return false;
 
-                var version = ReadU32(image, segmentStart + 4);
-                if (version != 7)
+                if (ReadU32(image, segmentStart + 4) != 7)
                     return false;
 
                 var commonMetadataSize = ReadU32(image, segmentStart + 8);
@@ -250,7 +317,6 @@ namespace OplusEdlTool.Services
 
                 var softwareId = ReadU32(image, commonStart + 8);
                 var hashAlgorithm = ReadU32(image, commonStart + 16);
-
                 var antiRollbackVersion = ReadU32(image, oemStart + 8);
                 var mrcIndex = ReadU32(image, oemStart + 12);
 
@@ -262,19 +328,15 @@ namespace OplusEdlTool.Services
                         soc.Add(value);
                 }
 
-                var oemId = ReadU32(image, oemStart + 136);
-                var oemProductId = ReadU32(image, oemStart + 140);
-                var flags = ReadU32(image, oemStart + 220);
-
                 info = new MbnV7Info(
                     softwareId,
                     hashAlgorithm,
                     antiRollbackVersion,
                     mrcIndex,
                     soc.ToArray(),
-                    oemId,
-                    oemProductId,
-                    flags
+                    ReadU32(image, oemStart + 136),
+                    ReadU32(image, oemStart + 140),
+                    ReadU32(image, oemStart + 220)
                 );
 
                 return true;
@@ -283,18 +345,6 @@ namespace OplusEdlTool.Services
             {
                 return false;
             }
-        }
-
-        private static string FormatSocVersions(uint[] values)
-        {
-            if (values.Length == 0)
-                return "none";
-
-            var parts = new string[values.Length];
-            for (var i = 0; i < values.Length; i++)
-                parts[i] = $"0x{values[i]:x}";
-
-            return string.Join(",", parts);
         }
 
         private static string GetSoftwareIdName(uint softwareId)
