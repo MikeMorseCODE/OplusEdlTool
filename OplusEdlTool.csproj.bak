@@ -1,11 +1,15 @@
 <Project Sdk="Microsoft.NET.Sdk">
-
   <PropertyGroup>
-    <OutputType>Exe</OutputType>
+    <OutputType>WinExe</OutputType>
     <TargetFramework>net8.0</TargetFramework>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <Nullable>enable</Nullable>
+    <PublishAot>true</PublishAot>
+    <BuiltInComInteropSupport>false</BuiltInComInteropSupport>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <ApplicationIcon>app.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>
@@ -15,17 +19,17 @@
     <PackageReference Include="Avalonia.Fonts.Inter" Version="11.0.10" />
     <PackageReference Include="Avalonia.ReactiveUI" Version="11.0.10" />
     <PackageReference Include="Avalonia.Controls.DataGrid" Version="11.0.10" />
-    <PackageReference Include="LibUsbDotNet" Version="3.0.224" />
+    <PackageReference Include="System.Management" Version="8.0.0" />
   </ItemGroup>
 
   <ItemGroup>
-    <Compile Remove="v1_old_code/**" />
-    <EmbeddedResource Remove="v1_old_code/**" />
-    <None Remove="v1_old_code/**" />
+    <Compile Remove="v1_old_code\**" />
+    <EmbeddedResource Remove="v1_old_code\**" />
+    <None Remove="v1_old_code\**" />
   </ItemGroup>
 
   <ItemGroup>
-    <Content Include="Tools/**/*">
+    <Content Include="Tools\**\*">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
       <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
@@ -33,9 +37,8 @@
   </ItemGroup>
 
   <ItemGroup>
-    <AvaloniaResource Include="Fonts/*.ttf" />
-    <AvaloniaResource Include="Fonts/*.otf" />
+    <AvaloniaResource Include="Fonts\*.ttf" />
+    <AvaloniaResource Include="Fonts\*.otf" />
     <AvaloniaResource Include="app.ico" />
   </ItemGroup>
-
 </Project>

@@ -1175,22 +1175,6 @@ namespace OplusEdlTool
                 if (token.IsCancellationRequested) { AppendLog("Enter Firehose cancelled."); return; }
                 if (!ok) { AppendLog("Failed to send programmer"); return; }
 
-                if (OperatingSystem.IsLinux())
-                {
-                    currentPort = port;
-
-                    AppendLog(
-                        "Linux Sahara programmer upload completed successfully."
-                    );
-
-                    AppendLog(
-                        "Stopping before Firehose authentication/configuration: " +
-                        "the Linux fh_loader replacement is the next porting stage."
-                    );
-
-                    return;
-                }
-
                 if (!string.IsNullOrWhiteSpace(Digest.Text))
                 {
                     AppendLog("Sending digest...");

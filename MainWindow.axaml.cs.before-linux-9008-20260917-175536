@@ -331,56 +331,10 @@ namespace OplusEdlTool
         {
             try
             {
-                if (OperatingSystem.IsLinux())
-                {
-                    const string usbRoot = "/sys/bus/usb/devices";
-
-                    if (!Directory.Exists(usbRoot))
-                        return null;
-
-                    foreach (var deviceDir in Directory.EnumerateDirectories(usbRoot))
-                    {
-                        var vendorPath = Path.Combine(deviceDir, "idVendor");
-                        var productPath = Path.Combine(deviceDir, "idProduct");
-
-                        if (!File.Exists(vendorPath) || !File.Exists(productPath))
-                            continue;
-
-                        var vendor = File.ReadAllText(vendorPath).Trim();
-                        var product = File.ReadAllText(productPath).Trim();
-
-                        if (vendor.Equals("05c6", StringComparison.OrdinalIgnoreCase) &&
-                            product.Equals("9008", StringComparison.OrdinalIgnoreCase))
-                        {
-                            var busPath = Path.Combine(deviceDir, "busnum");
-                            var devPath = Path.Combine(deviceDir, "devnum");
-
-                            var bus = File.Exists(busPath)
-                                ? File.ReadAllText(busPath).Trim()
-                                : "?";
-
-                            var dev = File.Exists(devPath)
-                                ? File.ReadAllText(devPath).Trim()
-                                : "?";
-
-                            return $"Qualcomm EDL 05c6:9008 [Bus {bus} Device {dev}]";
-                        }
-                    }
-
-                    return null;
-                }
-
-                // Windows backend
                 var toolsDir = FindToolsDir();
-
-                if (toolsDir == null)
-                    return null;
-
-                var lsusb = Path.Combine(toolsDir, "lsusb.exe");
-
-                if (!File.Exists(lsusb))
-                    return null;
-
+                if (toolsDir == null) return null;
+                var lsusb = System.IO.Path.Combine(toolsDir, "lsusb.exe");
+                if (!System.IO.File.Exists(lsusb)) return null;
                 var psi = new System.Diagnostics.ProcessStartInfo
                 {
                     FileName = lsusb,
@@ -389,31 +343,14 @@ namespace OplusEdlTool
                     RedirectStandardOutput = true,
                     CreateNoWindow = true
                 };
-
-                using var proc = System.Diagnostics.Process.Start(psi);
-
-                if (proc == null)
-                    return null;
-
-                var output = proc.StandardOutput.ReadToEnd();
-
-                proc.WaitForExit(2000);
-
-                var m = Regex.Match(
-                    output,
-                    @"Qualcomm HS-USB QDLoader 9008 \(COM(?<n>\d+)\)"
-                );
-
-                if (m.Success)
-                    return "COM" + m.Groups["n"].Value;
+                using var p = System.Diagnostics.Process.Start(psi);
+                if (p == null) return null;
+                var output = p.StandardOutput.ReadToEnd();
+                p.WaitForExit(2000);
+                var m = Regex.Match(output, @"Qualcomm HS-USB QDLoader 9008 \(COM(?<n>\d+)\)");
+                if (m.Success) return "COM" + m.Groups["n"].Value;
             }
-            catch (Exception ex)
-            {
-                System.Diagnostics.Debug.WriteLine(
-                    $"9008 detection failed: {ex.Message}"
-                );
-            }
-
+            catch { }
             return null;
         }
         
@@ -1174,22 +1111,6 @@ namespace OplusEdlTool
                 var ok = await edl.SendProgrammerAsync(port, DevPrg.Text);
                 if (token.IsCancellationRequested) { AppendLog("Enter Firehose cancelled."); return; }
                 if (!ok) { AppendLog("Failed to send programmer"); return; }
-
-                if (OperatingSystem.IsLinux())
-                {
-                    currentPort = port;
-
-                    AppendLog(
-                        "Linux Sahara programmer upload completed successfully."
-                    );
-
-                    AppendLog(
-                        "Stopping before Firehose authentication/configuration: " +
-                        "the Linux fh_loader replacement is the next porting stage."
-                    );
-
-                    return;
-                }
 
                 if (!string.IsNullOrWhiteSpace(Digest.Text))
                 {

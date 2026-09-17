@@ -1,0 +1,938 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+cd "$(dirname "$0")"
+
+STAMP="$(date +%Y%m%d-%H%M%S)"
+
+echo "=============================================="
+echo " OplusEdlTool Linux Sahara integration"
+echo "=============================================="
+
+echo
+echo "===== BACKUPS ====="
+cp -av Services/EdlService.cs \
+  "Services/EdlService.cs.before-linux-sahara-$STAMP"
+
+cp -av MainWindow.axaml.cs \
+  "MainWindow.axaml.cs.before-linux-sahara-$STAMP"
+
+cp -av OplusEdlTool.csproj \
+  "OplusEdlTool.csproj.before-linux-sahara-$STAMP"
+
+echo
+echo "===== ADD LIBUSB .NET BACKEND ====="
+
+if ! grep -q 'LibUsbDotNet' OplusEdlTool.csproj; then
+    /usr/bin/dotnet add package LibUsbDotNet --version 3.0.224
+else
+    echo "LibUsbDotNet already present"
+fi
+
+echo
+echo "===== CREATE LinuxEdlBackend.cs ====="
+
+cat > Services/LinuxEdlBackend.cs <<'CS'
+using System;
+using System.Buffers.Binary;
+using System.IO;
+using System.Linq;
+using System.Threading.Tasks;
+
+using LibUsbDotNet;
+using LibUsbDotNet.LibUsb;
+using LibUsbDotNet.Main;
+
+namespace OplusEdlTool.Services
+{
+    /// <summary>
+    /// Native Linux Qualcomm EDL/Sahara backend.
+    ///
+    /// Stage 1:
+    ///   - Detect Qualcomm 05c6:9008
+    ///   - Open libusb interface 0
+    ///   - Receive Sahara HELLO
+    ///   - Send HELLO_RESP in image-transfer mode
+    ///   - Service READ_DATA / READ_DATA64
+    ///   - Send programmer from disk
+    ///   - Complete Sahara with DONE
+    ///
+    /// This stage does NOT implement Firehose storage commands yet.
+    /// </summary>
+    internal sealed class LinuxEdlBackend
+    {
+        private const int VendorId = 0x05c6;
+        private const int ProductId = 0x9008;
+
+        private const uint SaharaHello = 0x01;
+        private const uint SaharaHelloResponse = 0x02;
+        private const uint SaharaReadData = 0x03;
+        private const uint SaharaEndOfImage = 0x04;
+        private const uint SaharaDone = 0x05;
+        private const uint SaharaDoneResponse = 0x06;
+        private const uint SaharaReset = 0x07;
+        private const uint SaharaReadData64 = 0x12;
+
+        // "<?xm" interpreted little-endian.
+        private const uint SaharaXml = 0x6d783f3c;
+
+        private const uint SaharaModeWaitingForImage = 0;
+
+        private readonly Action<string>? onLine;
+        private readonly Action<int>? onPercent;
+
+        public LinuxEdlBackend(
+            Action<string>? onLine = null,
+            Action<int>? onPercent = null)
+        {
+            this.onLine = onLine;
+            this.onPercent = onPercent;
+        }
+
+        public bool Is9008Present()
+        {
+            const string usbRoot = "/sys/bus/usb/devices";
+
+            if (!Directory.Exists(usbRoot))
+                return false;
+
+            try
+            {
+                foreach (var deviceDir in Directory.EnumerateDirectories(usbRoot))
+                {
+                    var vidPath = Path.Combine(deviceDir, "idVendor");
+                    var pidPath = Path.Combine(deviceDir, "idProduct");
+
+                    if (!File.Exists(vidPath) || !File.Exists(pidPath))
+                        continue;
+
+                    var vid = File.ReadAllText(vidPath).Trim();
+                    var pid = File.ReadAllText(pidPath).Trim();
+
+                    if (
+                        vid.Equals("05c6", StringComparison.OrdinalIgnoreCase) &&
+                        pid.Equals("9008", StringComparison.OrdinalIgnoreCase)
+                    )
+                    {
+                        return true;
+                    }
+                }
+            }
+            catch
+            {
+            }
+
+            return false;
+        }
+
+        public Task<bool> SendProgrammerAsync(string programmerPath)
+        {
+            return Task.Run(() => SendProgrammer(programmerPath));
+        }
+
+        private bool SendProgrammer(string programmerPath)
+        {
+            if (!File.Exists(programmerPath))
+            {
+                Log($"[Linux/Sahara] Programmer not found: {programmerPath}");
+                return false;
+            }
+
+            var programmer = File.ReadAllBytes(programmerPath);
+
+            if (programmer.Length == 0)
+            {
+                Log("[Linux/Sahara] Programmer file is empty.");
+                return false;
+            }
+
+            Log(
+                $"[Linux/Sahara] Programmer: " +
+                $"{Path.GetFileName(programmerPath)} " +
+                $"({programmer.Length:N0} bytes)"
+            );
+
+            using var context = new UsbContext();
+            using var devices = context.List();
+
+            var device = devices.FirstOrDefault(
+                d => d.VendorId == VendorId &&
+                     d.ProductId == ProductId
+            );
+
+            if (device == null)
+            {
+                Log("[Linux/Sahara] Qualcomm 05c6:9008 not found.");
+                return false;
+            }
+
+            var claimedInterface = -1;
+
+            try
+            {
+                Log("[Linux/Sahara] Opening 05c6:9008...");
+                device.Open();
+
+                if (device.Configs.Count == 0 ||
+                    device.Configs[0].Interfaces.Count == 0)
+                {
+                    throw new IOException(
+                        "No USB configuration/interface found."
+                    );
+                }
+
+                claimedInterface =
+                    device.Configs[0].Interfaces[0].Number;
+
+                Log(
+                    $"[Linux/Sahara] Claiming interface " +
+                    $"{claimedInterface}"
+                );
+
+                device.ClaimInterface(claimedInterface);
+
+                // Your OnePlus 11 exposed:
+                //
+                //     0x81 BULK IN
+                //     0x01 BULK OUT
+                //
+                var reader = device.OpenEndpointReader(
+                    ReadEndpointID.Ep01,
+                    4096
+                );
+
+                var writer = device.OpenEndpointWriter(
+                    WriteEndpointID.Ep01
+                );
+
+                Log(
+                    "[Linux/Sahara] USB transport ready " +
+                    "(IN=0x81 OUT=0x01)"
+                );
+
+                onPercent?.Invoke(0);
+
+                while (true)
+                {
+                    var packet = ReadPacket(reader);
+
+                    if (packet.Length < 8)
+                    {
+                        throw new IOException(
+                            $"Short Sahara packet: {packet.Length}"
+                        );
+                    }
+
+                    var command = ReadU32(packet, 0);
+                    var packetLength = ReadU32(packet, 4);
+
+                    Log(
+                        $"[Linux/Sahara] RX cmd=0x{command:x2} " +
+                        $"len={packetLength}"
+                    );
+
+                    switch (command)
+                    {
+                        case SaharaHello:
+                        {
+                            HandleHello(packet, writer);
+                            break;
+                        }
+
+                        case SaharaReadData:
+                        {
+                            if (packet.Length < 20)
+                                throw new IOException(
+                                    "Malformed SAHARA_READ_DATA packet."
+                                );
+
+                            var imageId = ReadU32(packet, 8);
+                            var offset = ReadU32(packet, 12);
+                            var length = ReadU32(packet, 16);
+
+                            Log(
+                                $"[Linux/Sahara] READ_DATA " +
+                                $"image={imageId} " +
+                                $"offset=0x{offset:x} " +
+                                $"length=0x{length:x}"
+                            );
+
+                            SendProgrammerRange(
+                                writer,
+                                programmer,
+                                offset,
+                                length
+                            );
+
+                            UpdateProgress(
+                                programmer.LongLength,
+                                (long)offset + length
+                            );
+
+                            break;
+                        }
+
+                        case SaharaReadData64:
+                        {
+                            if (packet.Length < 32)
+                                throw new IOException(
+                                    "Malformed SAHARA_READ_DATA64 packet."
+                                );
+
+                            var imageId = ReadU64(packet, 8);
+                            var offset = ReadU64(packet, 16);
+                            var length = ReadU64(packet, 24);
+
+                            Log(
+                                $"[Linux/Sahara] READ_DATA64 " +
+                                $"image={imageId} " +
+                                $"offset=0x{offset:x} " +
+                                $"length=0x{length:x}"
+                            );
+
+                            SendProgrammerRange(
+                                writer,
+                                programmer,
+                                offset,
+                                length
+                            );
+
+                            var completed =
+                                offset > long.MaxValue ||
+                                length > long.MaxValue ||
+                                offset + length > long.MaxValue
+                                    ? programmer.LongLength
+                                    : (long)(offset + length);
+
+                            UpdateProgress(
+                                programmer.LongLength,
+                                completed
+                            );
+
+                            break;
+                        }
+
+                        case SaharaEndOfImage:
+                        {
+                            if (packet.Length < 16)
+                                throw new IOException(
+                                    "Malformed SAHARA_END_OF_IMAGE packet."
+                                );
+
+                            var imageId = ReadU32(packet, 8);
+                            var status = ReadU32(packet, 12);
+
+                            Log(
+                                $"[Linux/Sahara] END_OF_IMAGE " +
+                                $"image={imageId} status=0x{status:x}"
+                            );
+
+                            if (status != 0)
+                            {
+                                Log(
+                                    "[Linux/Sahara] Device rejected " +
+                                    $"programmer, Sahara status=0x{status:x}"
+                                );
+
+                                return false;
+                            }
+
+                            Log("[Linux/Sahara] Sending DONE...");
+                            WriteExact(writer, BuildDonePacket());
+                            break;
+                        }
+
+                        case SaharaDoneResponse:
+                        {
+                            uint status =
+                                packet.Length >= 12
+                                    ? ReadU32(packet, 8)
+                                    : 0xffffffff;
+
+                            Log(
+                                $"[Linux/Sahara] DONE_RESP " +
+                                $"status=0x{status:x}"
+                            );
+
+                            onPercent?.Invoke(100);
+
+                            Log(
+                                "[Linux/Sahara] Programmer upload complete."
+                            );
+
+                            return true;
+                        }
+
+                        case SaharaReset:
+                        {
+                            Log(
+                                "[Linux/Sahara] Device requested reset."
+                            );
+                            return false;
+                        }
+
+                        case SaharaXml:
+                        {
+                            Log(
+                                "[Linux/Sahara] Firehose XML detected; " +
+                                "loader is already running."
+                            );
+
+                            onPercent?.Invoke(100);
+                            return true;
+                        }
+
+                        default:
+                        {
+                            Log(
+                                $"[Linux/Sahara] Unsupported packet " +
+                                $"0x{command:x}"
+                            );
+
+                            Log(HexDump(packet));
+                            return false;
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Log(
+                    $"[Linux/Sahara] ERROR: " +
+                    $"{ex.GetType().Name}: {ex.Message}"
+                );
+
+                return false;
+            }
+            finally
+            {
+                try
+                {
+                    if (claimedInterface >= 0)
+                        device.ReleaseInterface(claimedInterface);
+                }
+                catch
+                {
+                }
+
+                try
+                {
+                    device.Close();
+                }
+                catch
+                {
+                }
+            }
+        }
+
+        private void HandleHello(
+            byte[] packet,
+            UsbEndpointWriter writer)
+        {
+            if (packet.Length < 24)
+                throw new IOException(
+                    "Malformed SAHARA_HELLO packet."
+                );
+
+            var version = ReadU32(packet, 8);
+            var compatible = ReadU32(packet, 12);
+            var maxLength = ReadU32(packet, 16);
+            var mode = ReadU32(packet, 20);
+
+            Log(
+                $"[Linux/Sahara] HELLO " +
+                $"version={version} " +
+                $"compatible={compatible} " +
+                $"maxlen={maxLength} " +
+                $"mode={mode}"
+            );
+
+            //
+            // Match Qualcomm qdl behavior:
+            // host version 2, compatible 1, success 0,
+            // waiting-for-image mode.
+            //
+            var response = new byte[48];
+
+            WriteU32(response, 0, SaharaHelloResponse);
+            WriteU32(response, 4, 48);
+            WriteU32(response, 8, 2);
+            WriteU32(response, 12, 1);
+            WriteU32(response, 16, 0);
+            WriteU32(
+                response,
+                20,
+                SaharaModeWaitingForImage
+            );
+
+            Log(
+                "[Linux/Sahara] TX HELLO_RESP " +
+                "(WaitingForImage)"
+            );
+
+            WriteExact(writer, response);
+        }
+
+        private void SendProgrammerRange(
+            UsbEndpointWriter writer,
+            byte[] programmer,
+            ulong offset,
+            ulong requestedLength)
+        {
+            if (offset > (ulong)programmer.LongLength)
+            {
+                throw new IOException(
+                    $"Device requested offset 0x{offset:x} " +
+                    $"past programmer size 0x{programmer.LongLength:x}."
+                );
+            }
+
+            if (requestedLength > int.MaxValue)
+            {
+                throw new IOException(
+                    $"Sahara requested an unreasonable block: " +
+                    $"{requestedLength} bytes."
+                );
+            }
+
+            if (
+                requestedLength >
+                (ulong)programmer.LongLength - offset
+            )
+            {
+                throw new IOException(
+                    $"Device requested programmer range " +
+                    $"0x{offset:x}+0x{requestedLength:x}, " +
+                    $"file size is 0x{programmer.LongLength:x}."
+                );
+            }
+
+            var sourceOffset = checked((int)offset);
+            var remaining = checked((int)requestedLength);
+
+            while (remaining > 0)
+            {
+                //
+                // Keep individual host writes reasonably sized.
+                //
+                var count = Math.Min(
+                    remaining,
+                    1024 * 1024
+                );
+
+                var span = programmer.AsSpan(
+                    sourceOffset,
+                    count
+                );
+
+                var error = writer.Write(
+                    span,
+                    15000,
+                    out var written
+                );
+
+                if (error != Error.Success)
+                {
+                    throw new IOException(
+                        $"USB write failed: {error}"
+                    );
+                }
+
+                if (written <= 0)
+                {
+                    throw new IOException(
+                        "USB write returned zero bytes."
+                    );
+                }
+
+                sourceOffset += written;
+                remaining -= written;
+            }
+        }
+
+        private static byte[] ReadPacket(
+            UsbEndpointReader reader)
+        {
+            var buffer = new byte[4096];
+
+            var error = reader.Read(
+                buffer,
+                10000,
+                out var transferred
+            );
+
+            if (error != Error.Success)
+            {
+                throw new IOException(
+                    $"USB read failed: {error}"
+                );
+            }
+
+            if (transferred <= 0)
+            {
+                throw new IOException(
+                    "USB read returned no data."
+                );
+            }
+
+            Array.Resize(ref buffer, transferred);
+            return buffer;
+        }
+
+        private static void WriteExact(
+            UsbEndpointWriter writer,
+            byte[] data)
+        {
+            var offset = 0;
+
+            while (offset < data.Length)
+            {
+                var error = writer.Write(
+                    data,
+                    offset,
+                    data.Length - offset,
+                    10000,
+                    out var written
+                );
+
+                if (error != Error.Success)
+                {
+                    throw new IOException(
+                        $"USB write failed: {error}"
+                    );
+                }
+
+                if (written <= 0)
+                {
+                    throw new IOException(
+                        "USB write returned zero bytes."
+                    );
+                }
+
+                offset += written;
+            }
+        }
+
+        private static byte[] BuildDonePacket()
+        {
+            var packet = new byte[8];
+
+            WriteU32(packet, 0, SaharaDone);
+            WriteU32(packet, 4, 8);
+
+            return packet;
+        }
+
+        private void UpdateProgress(
+            long total,
+            long complete)
+        {
+            if (total <= 0)
+                return;
+
+            var percent = (int)Math.Clamp(
+                complete * 100L / total,
+                0,
+                100
+            );
+
+            onPercent?.Invoke(percent);
+        }
+
+        private void Log(string message)
+        {
+            onLine?.Invoke(message);
+        }
+
+        private static uint ReadU32(
+            byte[] buffer,
+            int offset)
+        {
+            return BinaryPrimitives.ReadUInt32LittleEndian(
+                buffer.AsSpan(offset, 4)
+            );
+        }
+
+        private static ulong ReadU64(
+            byte[] buffer,
+            int offset)
+        {
+            return BinaryPrimitives.ReadUInt64LittleEndian(
+                buffer.AsSpan(offset, 8)
+            );
+        }
+
+        private static void WriteU32(
+            byte[] buffer,
+            int offset,
+            uint value)
+        {
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                buffer.AsSpan(offset, 4),
+                value
+            );
+        }
+
+        private static string HexDump(byte[] data)
+        {
+            return BitConverter
+                .ToString(data)
+                .Replace("-", " ");
+        }
+    }
+}
+CS
+
+echo
+echo "===== PATCH EdlService.cs ====="
+
+python3 <<'PY'
+from pathlib import Path
+
+path = Path("Services/EdlService.cs")
+src = path.read_text()
+
+
+def replace_method(src, signature, replacement):
+    start = src.find(signature)
+    if start < 0:
+        raise SystemExit(f"ERROR: method not found: {signature}")
+
+    brace = src.find("{", start)
+    if brace < 0:
+        raise SystemExit(f"ERROR: opening brace missing: {signature}")
+
+    depth = 0
+    end = None
+
+    for i in range(brace, len(src)):
+        if src[i] == "{":
+            depth += 1
+        elif src[i] == "}":
+            depth -= 1
+            if depth == 0:
+                end = i + 1
+                break
+
+    if end is None:
+        raise SystemExit(f"ERROR: method boundary failed: {signature}")
+
+    return src[:start] + replacement + src[end:]
+
+
+field_needle = """        private string? WorkDirCache;
+"""
+
+if "private readonly LinuxEdlBackend? linuxBackend;" not in src:
+    src = src.replace(
+        field_needle,
+        field_needle +
+        "        private readonly LinuxEdlBackend? linuxBackend;\n"
+    )
+
+constructor_old = """        public EdlService(System.Action<string>? onLine = null, System.Action<int>? onPercent = null)
+        {
+            this.onLine = onLine;
+            this.onPercent = onPercent;
+        }
+"""
+
+constructor_new = """        public EdlService(System.Action<string>? onLine = null, System.Action<int>? onPercent = null)
+        {
+            this.onLine = onLine;
+            this.onPercent = onPercent;
+
+            if (OperatingSystem.IsLinux())
+            {
+                linuxBackend = new LinuxEdlBackend(onLine, onPercent);
+            }
+        }
+"""
+
+if constructor_old in src:
+    src = src.replace(constructor_old, constructor_new)
+elif "linuxBackend = new LinuxEdlBackend" not in src:
+    raise SystemExit("ERROR: could not patch EdlService constructor")
+
+wait_method = r'''        public async Task<string> WaitForEdlPortAsync(CancellationToken cancellationToken = default)
+        {
+            if (OperatingSystem.IsLinux())
+            {
+                if (linuxBackend == null)
+                    throw new InvalidOperationException(
+                        "Linux EDL backend was not initialized."
+                    );
+
+                while (!cancellationToken.IsCancellationRequested)
+                {
+                    if (linuxBackend.Is9008Present())
+                        return "usb:05c6:9008";
+
+                    await Task.Delay(500, cancellationToken);
+                }
+
+                cancellationToken.ThrowIfCancellationRequested();
+                return string.Empty;
+            }
+
+            var bin = FindToolsDir();
+
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                var res = await ProcessRunner.RunAsync(
+                    Path.Combine(bin, "lsusb.exe"),
+                    "",
+                    bin,
+                    null,
+                    onPercent
+                );
+
+                var m = Regex.Match(
+                    res.Item2,
+                    @"Qualcomm HS-USB QDLoader 9008 \(COM(?<n>\d+)\)"
+                );
+
+                if (m.Success)
+                    return "COM" + m.Groups["n"].Value;
+
+                try
+                {
+                    await Task.Delay(1000, cancellationToken);
+                }
+                catch (OperationCanceledException)
+                {
+                    break;
+                }
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
+            return string.Empty;
+        }'''
+
+src = replace_method(
+    src,
+    "public async Task<string> WaitForEdlPortAsync(",
+    wait_method
+)
+
+programmer_method = r'''        public async Task<bool> SendProgrammerAsync(string port, string devprgPath)
+        {
+            if (OperatingSystem.IsLinux())
+            {
+                if (linuxBackend == null)
+                    throw new InvalidOperationException(
+                        "Linux EDL backend was not initialized."
+                    );
+
+                onLine?.Invoke(
+                    "[Linux] Using native libusb Sahara backend."
+                );
+
+                return await linuxBackend.SendProgrammerAsync(
+                    devprgPath
+                );
+            }
+
+            var tools = FindToolsDir();
+            var workDir = GetWorkDir();
+            var device = BuildDevicePath(port);
+            var args =
+                $"-p {device} -s 13:\"{devprgPath}\"";
+
+            var res = await ProcessRunner.RunAsync(
+                Path.Combine(tools, "QSaharaServer.exe"),
+                args,
+                workDir,
+                onLine,
+                onPercent
+            );
+
+            return res.Item1 == 0;
+        }'''
+
+src = replace_method(
+    src,
+    "public async Task<bool> SendProgrammerAsync(",
+    programmer_method
+)
+
+path.write_text(src)
+
+print("PASS: EdlService Linux dispatch installed")
+PY
+
+echo
+echo "===== PATCH GUI FLOW ====="
+
+python3 <<'PY'
+from pathlib import Path
+
+path = Path("MainWindow.axaml.cs")
+src = path.read_text()
+
+needle = '''                if (!ok) { AppendLog("Failed to send programmer"); return; }
+
+                if (!string.IsNullOrWhiteSpace(Digest.Text))
+'''
+
+replacement = '''                if (!ok) { AppendLog("Failed to send programmer"); return; }
+
+                if (OperatingSystem.IsLinux())
+                {
+                    currentPort = port;
+
+                    AppendLog(
+                        "Linux Sahara programmer upload completed successfully."
+                    );
+
+                    AppendLog(
+                        "Stopping before Firehose authentication/configuration: " +
+                        "the Linux fh_loader replacement is the next porting stage."
+                    );
+
+                    return;
+                }
+
+                if (!string.IsNullOrWhiteSpace(Digest.Text))
+'''
+
+if replacement in src:
+    print("GUI Linux stop already installed")
+elif needle in src:
+    src = src.replace(needle, replacement, 1)
+    path.write_text(src)
+    print("PASS: GUI now stops before Windows-only Firehose stage")
+else:
+    raise SystemExit(
+        "ERROR: could not locate programmer-success block"
+    )
+PY
+
+echo
+echo "===== VERIFY PACKAGE ====="
+grep -n 'LibUsbDotNet' OplusEdlTool.csproj || true
+
+echo
+echo "===== VERIFY LINUX DISPATCH ====="
+grep -n -A14 -B3 \
+  'Using native libusb Sahara backend' \
+  Services/EdlService.cs
+
+echo
+echo "===== BUILD ====="
+/usr/bin/dotnet restore
+/usr/bin/dotnet build
+
+echo
+echo "=============================================="
+echo " BUILD PASSED"
+echo "=============================================="
+echo
+echo "Run:"
+echo
+echo "  /usr/bin/dotnet run --no-build"
+echo
+echo "Then select your programmer and press Enter Firehose."
+echo
+echo "Linux will stop after Sahara programmer upload."
+echo "No Firehose storage commands are enabled by this patch."

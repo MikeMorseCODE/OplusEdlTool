@@ -42,16 +42,10 @@ namespace OplusEdlTool.Services
         public string StorageType { get; set; } = "ufs";
         private string? ToolsDirCache;
         private string? WorkDirCache;
-        private readonly LinuxEdlBackend? linuxBackend;
         public EdlService(System.Action<string>? onLine = null, System.Action<int>? onPercent = null)
         {
             this.onLine = onLine;
             this.onPercent = onPercent;
-
-            if (OperatingSystem.IsLinux())
-            {
-                linuxBackend = new LinuxEdlBackend(onLine, onPercent);
-            }
         }
         private string FindToolsDir()
         {
@@ -113,47 +107,15 @@ namespace OplusEdlTool.Services
         }
         private string BuildDevicePath(string com) => "\\\\.\\" + com;
         
-                public async Task<string> WaitForEdlPortAsync(CancellationToken cancellationToken = default)
+        public async Task<string> WaitForEdlPortAsync(CancellationToken cancellationToken = default)
         {
-            if (OperatingSystem.IsLinux())
-            {
-                if (linuxBackend == null)
-                    throw new InvalidOperationException(
-                        "Linux EDL backend was not initialized."
-                    );
-
-                while (!cancellationToken.IsCancellationRequested)
-                {
-                    if (linuxBackend.Is9008Present())
-                        return "usb:05c6:9008";
-
-                    await Task.Delay(500, cancellationToken);
-                }
-
-                cancellationToken.ThrowIfCancellationRequested();
-                return string.Empty;
-            }
-
             var bin = FindToolsDir();
-
             while (!cancellationToken.IsCancellationRequested)
             {
-                var res = await ProcessRunner.RunAsync(
-                    Path.Combine(bin, "lsusb.exe"),
-                    "",
-                    bin,
-                    null,
-                    onPercent
-                );
-
-                var m = Regex.Match(
-                    res.Item2,
-                    @"Qualcomm HS-USB QDLoader 9008 \(COM(?<n>\d+)\)"
-                );
-
-                if (m.Success)
-                    return "COM" + m.Groups["n"].Value;
-
+                var res = await ProcessRunner.RunAsync(Path.Combine(bin, "lsusb.exe"), "", bin, null, onPercent);
+                var m = Regex.Match(res.Item2, @"Qualcomm HS-USB QDLoader 9008 \(COM(?<n>\d+)\)");
+                if (m.Success) return "COM" + m.Groups["n"].Value;
+                
                 try
                 {
                     await Task.Delay(1000, cancellationToken);
@@ -163,42 +125,17 @@ namespace OplusEdlTool.Services
                     break;
                 }
             }
-
+            
             cancellationToken.ThrowIfCancellationRequested();
             return string.Empty;
         }
-                public async Task<bool> SendProgrammerAsync(string port, string devprgPath)
+        public async Task<bool> SendProgrammerAsync(string port, string devprgPath)
         {
-            if (OperatingSystem.IsLinux())
-            {
-                if (linuxBackend == null)
-                    throw new InvalidOperationException(
-                        "Linux EDL backend was not initialized."
-                    );
-
-                onLine?.Invoke(
-                    "[Linux] Using native libusb Sahara backend."
-                );
-
-                return await linuxBackend.SendProgrammerAsync(
-                    devprgPath
-                );
-            }
-
             var tools = FindToolsDir();
             var workDir = GetWorkDir();
             var device = BuildDevicePath(port);
-            var args =
-                $"-p {device} -s 13:\"{devprgPath}\"";
-
-            var res = await ProcessRunner.RunAsync(
-                Path.Combine(tools, "QSaharaServer.exe"),
-                args,
-                workDir,
-                onLine,
-                onPercent
-            );
-
+            var args = $"-p {device} -s 13:\"{devprgPath}\"";
+            var res = await ProcessRunner.RunAsync(Path.Combine(tools, "QSaharaServer.exe"), args, workDir, onLine, onPercent);
             return res.Item1 == 0;
         }
         public async Task<bool> SendDigestsAsync(string port, string digestPath)
