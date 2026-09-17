@@ -1,5 +1,6 @@
 using System;
 using System.Buffers.Binary;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Threading;
@@ -225,7 +226,8 @@ namespace OplusEdlTool.Services
 
                 onPercent?.Invoke(0);
 
-                SaharaAuthStage? lastAuthStageRequested = null;
+                SaharaAuthStage? pendingAuthStage = null;
+                var passedAuthStages = new HashSet<(int Elf, int Ph)>();
 
                 while (true)
                 {
@@ -272,6 +274,13 @@ namespace OplusEdlTool.Services
                                 $"length=0x{length:x}"
                             );
 
+                            MarkPendingAuthPassed(
+                                ref pendingAuthStage,
+                                passedAuthStages,
+                                offset,
+                                length
+                            );
+
                             var authStage = FindAuthStage(
                                 authStages,
                                 offset,
@@ -280,7 +289,7 @@ namespace OplusEdlTool.Services
 
                             if (authStage.HasValue)
                             {
-                                lastAuthStageRequested = authStage;
+                                pendingAuthStage = authStage;
                                 Log(
                                     "[Linux/Sahara/Auth] Target requested " +
                                     "signed auth stage: " +
@@ -321,6 +330,13 @@ namespace OplusEdlTool.Services
                                 $"length=0x{length:x}"
                             );
 
+                            MarkPendingAuthPassed(
+                                ref pendingAuthStage,
+                                passedAuthStages,
+                                offset,
+                                length
+                            );
+
                             var authStage = FindAuthStage(
                                 authStages,
                                 offset,
@@ -329,7 +345,7 @@ namespace OplusEdlTool.Services
 
                             if (authStage.HasValue)
                             {
-                                lastAuthStageRequested = authStage;
+                                pendingAuthStage = authStage;
                                 Log(
                                     "[Linux/Sahara/Auth] Target requested " +
                                     "signed auth stage: " +
@@ -399,17 +415,18 @@ namespace OplusEdlTool.Services
                                         "initialization (DT/DDR/UFS/Firehose) has not " +
                                         "started yet."
                                     );
-                                    if (lastAuthStageRequested.HasValue)
+                                    SaharaAuthStage? rejectedStage = null;
+
+                                    if (pendingAuthStage.HasValue)
                                     {
-                                        var rejected =
-                                            lastAuthStageRequested.Value;
+                                        rejectedStage = pendingAuthStage.Value;
 
                                         Log(
                                             "[Linux/Sahara/Auth] Rejected stage: " +
-                                            rejected
+                                            rejectedStage.Value
                                         );
 
-                                        if (rejected.SoftwareId == 0x03)
+                                        if (rejectedStage.Value.SoftwareId == 0x03)
                                         {
                                             Log(
                                                 "[Linux/Sahara/Auth] Correlated failure: " +
@@ -426,10 +443,39 @@ namespace OplusEdlTool.Services
                                             "last target request."
                                         );
                                     }
+
+                                    LogAuthStateSummary(
+                                        authStages,
+                                        passedAuthStages,
+                                        rejectedStage,
+                                        status,
+                                        statusName
+                                    );
                                 }
 
                                 return false;
                             }
+
+                            if (pendingAuthStage.HasValue)
+                            {
+                                var accepted = pendingAuthStage.Value;
+                                passedAuthStages.Add(
+                                    (accepted.ElfIndex, accepted.ProgramHeaderIndex)
+                                );
+                                Log(
+                                    "[Linux/Sahara/Auth] AUTH PASSED: " +
+                                    ShortStageName(accepted)
+                                );
+                                pendingAuthStage = null;
+                            }
+
+                            LogAuthStateSummary(
+                                authStages,
+                                passedAuthStages,
+                                null,
+                                0,
+                                "SUCCESS"
+                            );
 
                             Log("[Linux/Sahara] Sending DONE...");
                             WriteExact(writer, BuildDonePacket());
@@ -583,7 +629,7 @@ namespace OplusEdlTool.Services
         }
 
         private static SaharaAuthStage? FindAuthStage(
-            System.Collections.Generic.IReadOnlyList<SaharaAuthStage> stages,
+            IReadOnlyList<SaharaAuthStage> stages,
             ulong offset,
             ulong length)
         {
@@ -594,6 +640,90 @@ namespace OplusEdlTool.Services
             }
 
             return null;
+        }
+
+        private void MarkPendingAuthPassed(
+            ref SaharaAuthStage? pendingAuthStage,
+            HashSet<(int Elf, int Ph)> passedAuthStages,
+            ulong nextOffset,
+            ulong nextLength)
+        {
+            if (!pendingAuthStage.HasValue)
+                return;
+
+            var pending = pendingAuthStage.Value;
+
+            // A repeated request for the same auth segment is not proof that
+            // authentication succeeded. Any different subsequent READ request
+            // means the target advanced beyond that auth decision.
+            if (pending.MatchesRange(nextOffset, nextLength))
+                return;
+
+            passedAuthStages.Add(
+                (pending.ElfIndex, pending.ProgramHeaderIndex)
+            );
+
+            Log(
+                "[Linux/Sahara/Auth] AUTH PASSED: " +
+                ShortStageName(pending)
+            );
+
+            pendingAuthStage = null;
+        }
+
+        private void LogAuthStateSummary(
+            IReadOnlyList<SaharaAuthStage> stages,
+            HashSet<(int Elf, int Ph)> passedAuthStages,
+            SaharaAuthStage? rejectedStage,
+            uint status,
+            string statusName)
+        {
+            if (stages.Count == 0)
+                return;
+
+            Log("[Linux/Sahara/Auth] ===== AUTH STATE SUMMARY =====");
+
+            foreach (var stage in stages)
+            {
+                var key = (stage.ElfIndex, stage.ProgramHeaderIndex);
+
+                if (rejectedStage.HasValue &&
+                    rejectedStage.Value.ElfIndex == stage.ElfIndex &&
+                    rejectedStage.Value.ProgramHeaderIndex == stage.ProgramHeaderIndex)
+                {
+                    Log(
+                        "[Linux/Sahara/Auth] " +
+                        ShortStageName(stage) +
+                        $" AUTH FAILED 0x{status:x} ({statusName})"
+                    );
+                }
+                else if (passedAuthStages.Contains(key))
+                {
+                    Log(
+                        "[Linux/Sahara/Auth] " +
+                        ShortStageName(stage) +
+                        " AUTH PASSED"
+                    );
+                }
+                else
+                {
+                    Log(
+                        "[Linux/Sahara/Auth] " +
+                        ShortStageName(stage) +
+                        " NOT REACHED"
+                    );
+                }
+            }
+
+            Log("[Linux/Sahara/Auth] ==============================");
+        }
+
+        private static string ShortStageName(SaharaAuthStage stage)
+        {
+            return
+                $"ELF{stage.ElfIndex}/PH{stage.ProgramHeaderIndex} " +
+                $"SW_ID=0x{stage.SoftwareId:x} ({stage.SoftwareIdName}) " +
+                $"ARB={stage.AntiRollbackVersion}";
         }
 
         private void SendProgrammerRange(
